@@ -1,0 +1,57 @@
+#! /usr/bin/python
+
+import glob
+import os
+import pathlib
+import runpy
+import sys
+
+
+CONFIG_DIR = f'{os.environ["HOME"]}/.config/sysman'
+
+
+class Module():
+    def __init__(self, path: str) -> None:
+        self.__loaded_module = runpy.run_path(path)
+    
+    def __getattr__(self, key: str) -> object:
+        try:
+            return self.__loaded_module[key]
+
+        except KeyError as e:
+            raise AttributeError(e)
+
+
+def help(modules: dict[str, Module]):
+    print('Usage: sysman MODULE [ARGUMENT]...')
+    print()
+    print('Collection of modules for system administration.')
+    print()
+    print('Available MODULEs:')
+    for name, module in modules.items():
+        print(f'{name:<20}{module._desc}')
+
+def main():
+    pathlib.Path(CONFIG_DIR).mkdir(parents=True, exist_ok=True)
+
+    file_directory = os.path.dirname(os.path.realpath(sys.argv[0]))
+    file_name = os.path.basename(__file__)
+
+    all_modules = [ Module(mod) for mod in glob.glob(f'{file_directory}/modules/*.py') ]
+    all_modules = { mod._name : mod for mod in all_modules }
+
+    if len(sys.argv) == 1 or sys.argv[1] not in all_modules.keys():
+        help(all_modules)
+
+        return
+
+    module, module_args = sys.argv[1], sys.argv[2:]
+    all_modules[module].main(module_args)
+
+
+if __name__=='__main__':
+    try:
+        main()
+    except Exception as e:
+        print(e.args[0])
+        exit(1)
