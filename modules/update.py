@@ -4,27 +4,40 @@ _desc = 'Update the system or rollback previous update.'
 import collections
 import datetime
 import glob
+import json
 import os
 import pathlib
 import subprocess
-import sys
+from dataclasses import dataclass, asdict
 
 
-TIMESTAMP_DIR = f'{os.environ["HOME"]}/.config/sysman/tmp'
-TIMESTAMP_FILE = f'{TIMESTAMP_DIR}/timestamp'
+CONFIG_DIR = f'{os.environ["HOME"]}/.config/sysman'
+PIPELINE_FILE = f'{CONFIG_DIR}/update_pipeline.json'
+TIMESTAMP_FILE = f'{CONFIG_DIR}/tmp/timestamp'
 PACMAN_LOG = '/var/log/pacman.log'
 PACMAN_CACHE_LOC = '/var/cache/pacman/pkg'
 CACHE_DIR = f'{os.getenv("HOME")}/.cache'
 AUR_CACHE_LOC = f'{CACHE_DIR}/yay'
 AUR_REBUILD_CACHE_LOC = f'{CACHE_DIR}/yay-rebuild'
-UPDATE_PROCESS = [ # args for subprocess.run, 1st array - command, 2nd dir - env
-    [ ['sudo', 'reflector', '--age', '12', '--score', '20', '--protocol', 'https', '--sort', 'rate', '--save', '/etc/pacman.d/mirrorlist'], None ],
-    [ ['sudo', 'pacman', '-Sy'], None ],
-    [ ['sudo', 'pacman', '-S', '--noconfirm', 'archlinux-keyring'], None ],
-    [ ['sudo', 'pacman', '-Su', '--noconfirm'], None ],
-    [ ['yay', '-Su', '--noconfirm'], None ],
-    [ ['yay', '-S', '--answerclean', 'All', '--rebuildtree', '--noconfirm', 'qt5-styleplugins', 'qt6gtk2'], None ] # env for this step is modified in script
-]
+
+
+@dataclass
+class UpdateStep:
+    command: str
+    special_env: str
+
+
+class CustomJsonEncoder(json.JSONEncoder):
+    def default(self, o):
+        if type(o) is list:
+            return [ self.default(i) for i in o ]
+
+        if type(o) is UpdateStep:
+            obj_dict = asdict(o)
+
+            return f'##<{obj_dict}>##'
+
+        return super().default(o)
 
 
 def read_timestamp() -> datetime.datetime:
@@ -40,6 +53,26 @@ def write_timestamp() -> str:
         f.write(timestamp)
 
     return timestamp
+
+def read_update_pipeline_file(timestamp: str) -> list[UpdateStep]:
+    with open(PIPELINE_FILE, 'r') as f:
+        file_content = json.load(f)
+
+    update_pipeline = []
+    for step in file_content:
+        cmd = step['command'].split(' ')
+
+        special_env = step['special_env']
+        if special_env == 'cache_rebuild':
+            env = { **os.environ, 'XDG_CACHE_HOME': f'{AUR_REBUILD_CACHE_LOC}/{timestamp}' }
+
+        else:
+            env = None
+
+        update_pipeline.append([ cmd, env ])
+    
+    return update_pipeline
+
 
 def is_date(string: str) -> bool:
     try:
@@ -78,16 +111,14 @@ def subprocess_run_sync(args: list[list[str], dict[str, str]]):
 
 def update_system():
     timestamp = write_timestamp()
-    
-    UPDATE_PROCESS[-1][1] = { **os.environ, 'XDG_CACHE_HOME': f'{AUR_REBUILD_CACHE_LOC}/{timestamp}' }
 
-    subprocess_run_sync(UPDATE_PROCESS)
+    update_pipeline = read_update_pipeline_file(timestamp)
+
+    subprocess_run_sync(update_pipeline)
 
 def rollback_update():
     if not os.path.isfile(TIMESTAMP_FILE):
-        print('No update performed on this system yet')
-
-        return
+        raise FileNotFoundError('No update performed on this system yet')
 
     timestamp = read_timestamp()
 
@@ -157,27 +188,50 @@ def rollback_update():
 
     write_timestamp()
 
-def pipeline():
-    for i, step in enumerate(UPDATE_PROCESS, 1):
-        print(f'{i}) {" ".join(step[0])}')
+def generate():
+    if os.path.isfile(PIPELINE_FILE):
+        raise FileExistsError(f'Pipeline file already exists at {PIPELINE_FILE}. Move it or delete it, then run this command again.')
+
+    stub_pipeline = [
+        UpdateStep('put your update command here', 'put a (case sensitive) keyword here to use special environment, leave this field empty to not use it; valid keywords are explained below'),
+        UpdateStep('commands defined here run sequentially', 'cache_rebuild -> modifies XDG_CACHE_HOME, use this keyword when rebuilding AUR packages')
+    ]
+
+    stub_json = json.dumps(stub_pipeline, indent=4, cls=CustomJsonEncoder)
+    stub_json = stub_json.replace('"##<', "").replace('>##"', "").replace('\'', "\"")
+
+    with open(PIPELINE_FILE, mode='w+') as f:
+        f.write(stub_json)
+
+    print(f'Generated stub file at {PIPELINE_FILE}.')
+
+def edit():
+    if not os.path.isfile(PIPELINE_FILE):
+        raise FileNotFoundError(f"Pipeline file doesn't exists at {PIPELINE_FILE}. Generate it using sysman update generate.")
+
+    subprocess.run([os.environ['EDITOR'], PIPELINE_FILE])
 
 def help():
     print('Usage: sysman update COMMAND')
     print()
     print('Available COMMANDs:')
     print(f'{"help":<20}Prints this message.')
-    print(f'{"pipeline":<20}Prints currently used update pipeline.')
-    print(f'{"run":<20}Updates the system. The update pipeline is defined in {os.path.dirname(os.path.realpath(sys.argv[0]))}/{os.path.basename(__file__)}, which you can change according to your needs.')
+    print(f'{"generate":<20}Generates an empty pipeline file.')
+    print(f'{"edit":<20}Opens the pipeline file in $EDITOR.')
+    print(f'{"run":<20}Updates the system according to the pipeline file.')
     print(f'{"rollback":<20}Rollbacks the system to the state before the last update. All changes in packages (installs, uninstalls) since that time will be lost!')
 
 def main(args: list[str]):
     pathlib.Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
-    if len(args) != 1 or args[0] not in [ 'pipeline', 'run', 'rollback' ]:
+    if len(args) != 1 or args[0] not in [ 'generate', 'edit', 'run', 'rollback' ]:
         help()
 
-    elif args[0] == 'pipeline':
-        pipeline()
+    elif args[0] == 'generate':
+        generate()
+
+    elif args[0] == 'edit':
+        edit()
     
     elif args[0] == 'run':
         update_system()
