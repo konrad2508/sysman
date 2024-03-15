@@ -1,5 +1,5 @@
 _name = 'service'
-_desc = 'Manage services'
+_desc = 'Manage services ran on your system by declaring them in a json file'
 
 import json
 import os
