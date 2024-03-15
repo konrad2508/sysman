@@ -8,6 +8,7 @@ import sys
 
 
 CONFIG_DIR = f'{os.environ["HOME"]}/.config/sysman'
+TMP_DIR = f'{CONFIG_DIR}/tmp'
 
 
 class Module():
@@ -33,6 +34,7 @@ def help(modules: dict[str, Module]):
 
 def main():
     pathlib.Path(CONFIG_DIR).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(TMP_DIR).mkdir(parents=True, exist_ok=True)
 
     file_directory = os.path.dirname(os.path.realpath(sys.argv[0]))
     file_name = os.path.basename(__file__)

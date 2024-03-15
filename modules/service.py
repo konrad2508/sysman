@@ -10,7 +10,7 @@ from dataclasses import dataclass, is_dataclass, fields, asdict
 
 SERVICEFILE_DIR = f'{os.environ["HOME"]}/.config/sysman'
 SERVICEFILE = f'{SERVICEFILE_DIR}/services.json'
-SERVICEFILE_OLD = f'{SERVICEFILE}.old'
+SERVICEFILE_OLD = f'{SERVICEFILE_DIR}/tmp/services.json.old'
 
 
 @dataclass

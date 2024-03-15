@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 
-TIMESTAMP_DIR = f'{os.environ["HOME"]}/.config/sysman'
+TIMESTAMP_DIR = f'{os.environ["HOME"]}/.config/sysman/tmp'
 TIMESTAMP_FILE = f'{TIMESTAMP_DIR}/timestamp'
 PACMAN_LOG = '/var/log/pacman.log'
 PACMAN_CACHE_LOC = '/var/cache/pacman/pkg'
