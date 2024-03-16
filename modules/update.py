@@ -104,10 +104,25 @@ def create_rollback_process(args: list[list[str], list[str], dict[str, str]]) ->
 
 def subprocess_run_sync(args: list[list[str], dict[str, str]]):
     for arg in args:
-        ret = subprocess.run(arg[0], env=arg[1]).returncode == 0
+        pipes_idx = [ -1 ] + [ i for i, o in enumerate(arg[0]) if o == '|' ] + [ None ]
 
-        if not ret:
-            return
+        ret = None
+        for i in range(1, len(pipes_idx)):
+            cmd = arg[0][pipes_idx[i - 1]+1:pipes_idx[i]]
+
+            if ret is None and pipes_idx[i] is None: # no pipes
+                subprocess_args = { 'env': arg[1], 'check': True }
+
+            elif ret is None: # pipes but first command
+                subprocess_args = { 'env': arg[1], 'check': True, 'capture_output': True }
+            
+            elif pipes_idx[i] is not None: # pipes but not last command
+                subprocess_args = { 'env': arg[1], 'check': True, 'input': ret.stdout, 'capture_output': True }
+            
+            else: # pipes and last command
+                subprocess_args = { 'env': arg[1], 'check': True, 'input': ret.stdout }
+
+            ret = subprocess.run(cmd, **subprocess_args)
 
 def update_system():
     timestamp = write_timestamp()
