@@ -83,6 +83,10 @@ def read_file_to_servicefile(path: str) -> ServiceFile:
     with open(path, 'r') as f:
         file_content = json.load(f)
 
+    for v in file_content.values():
+        for svc in v:
+            svc['name'] = os.path.expandvars(svc['name'])
+
     services = ServiceFile(
         [ Service(**o, svc_type='system') for o in file_content.get('system_services', []) ],
         [ LocalService(**o, svc_type='system') for o in file_content.get('local_system_services', []) ],
