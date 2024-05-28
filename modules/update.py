@@ -27,8 +27,25 @@ class UpdateStep:
     special_env: str
 
 
+@dataclass
+class UpdatePipeline:
+    name: str
+    pipeline: list[UpdateStep]
+
+
+@dataclass
+class UpdatePipelines:
+    pipelines: list[UpdatePipeline]
+
+
 class CustomJsonEncoder(json.JSONEncoder):
     def default(self, o):
+        if type(o) is UpdatePipelines:
+            return { i.name: self.default(i.pipeline) for i in o.pipelines }
+
+        if type(o) is UpdatePipeline:
+            return self.default(o.pipeline)
+
         if type(o) is list:
             return [ self.default(i) for i in o ]
 
@@ -46,20 +63,26 @@ def read_timestamp() -> datetime.datetime:
 
     return timestamp
 
-def write_timestamp() -> str:
+def write_timestamp(timestamp: str | None = None) -> str:
     with open(TIMESTAMP_FILE, 'w+') as f:
-        timestamp = datetime.datetime.now().astimezone().replace(microsecond=0).isoformat()
+        if timestamp is None:
+            timestamp = datetime.datetime.now().astimezone().replace(microsecond=0).isoformat()
 
         f.write(timestamp)
 
     return timestamp
 
-def read_update_pipeline_file(timestamp: str) -> list[UpdateStep]:
+def read_update_pipeline_file(timestamp: str, pipeline_name: str | None) -> list[UpdateStep]:
     with open(PIPELINE_FILE, 'r') as f:
         file_content = json.load(f)
 
+    if pipeline_name is None:
+        pipeline_name = next(iter(file_content))
+
+    pipeline = file_content[pipeline_name]
+
     update_pipeline = []
-    for step in file_content:
+    for step in pipeline:
         cmd = step['command'].split(' ')
 
         special_env = step['special_env']
@@ -124,12 +147,17 @@ def subprocess_run_sync(args: list[list[str], dict[str, str]]):
 
             ret = subprocess.run(cmd, **subprocess_args)
 
-def update_system():
+def update_system(pipeline_name: str | None):
+    old_timestamp = read_timestamp()
     timestamp = write_timestamp()
 
-    update_pipeline = read_update_pipeline_file(timestamp)
+    update_pipeline = read_update_pipeline_file(timestamp, pipeline_name)
 
-    subprocess_run_sync(update_pipeline)
+    try:
+        subprocess_run_sync(update_pipeline)
+
+    except subprocess.CalledProcessError:
+        write_timestamp(old_timestamp.isoformat())
 
 def rollback_update():
     if not os.path.isfile(TIMESTAMP_FILE):
@@ -207,12 +235,23 @@ def generate():
     if os.path.isfile(PIPELINE_FILE):
         raise FileExistsError(f'Pipeline file already exists at {PIPELINE_FILE}. Move it or delete it, then run this command again.')
 
-    stub_pipeline = [
+    stub_full_pipeline = [
         UpdateStep('put your update command here', 'put a (case sensitive) keyword here to use special environment, leave this field empty to not use it; valid keywords are explained below'),
         UpdateStep('commands defined here run sequentially', 'cache_rebuild -> modifies XDG_CACHE_HOME, use this keyword when rebuilding AUR packages')
     ]
 
-    stub_json = json.dumps(stub_pipeline, indent=4, cls=CustomJsonEncoder)
+    stub_minimal_pipeline = [
+        UpdateStep('some command', 'some env')
+    ]
+
+    pipelines = UpdatePipelines([
+        UpdatePipeline('insert pipeline name here', stub_full_pipeline),
+        UpdatePipeline('you can have multiple pipelines', stub_minimal_pipeline),
+        UpdatePipeline('specify pipeline to run using second argument', stub_minimal_pipeline),
+        UpdatePipeline('without second argument, first pipeline will be run', stub_minimal_pipeline)
+    ])
+
+    stub_json = json.dumps(pipelines, indent=4, cls=CustomJsonEncoder)
     stub_json = stub_json.replace('"##<', "").replace('>##"', "").replace('\'', "\"")
 
     with open(PIPELINE_FILE, mode='w+') as f:
@@ -233,13 +272,15 @@ def help():
     print(f'{"help":<20}Prints this message.')
     print(f'{"generate":<20}Generates an empty pipeline file.')
     print(f'{"edit":<20}Opens the pipeline file in $EDITOR.')
-    print(f'{"run":<20}Updates the system according to the pipeline file.')
+    print(f'{"run [PIPELINE_NAME]":<20}Updates the system using PIPELINE_NAME pipeline (or first one if PIPELINE_NAME is not given) defined in the pipeline file.')
     print(f'{"rollback":<20}Rollbacks the system to the state before the last update. All changes in packages (installs, uninstalls) since that time will be lost!')
 
 def main(args: list[str]):
     pathlib.Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
-    if len(args) != 1 or args[0] not in [ 'generate', 'edit', 'run', 'rollback' ]:
+    if len(args) == 0\
+    or (len(args) == 1 and args[0] not in [ 'generate', 'edit', 'run', 'rollback' ])\
+    or (len(args) == 2 and args[0] not in  [ 'run' ]):
         help()
 
     elif args[0] == 'generate':
@@ -249,7 +290,7 @@ def main(args: list[str]):
         edit()
     
     elif args[0] == 'run':
-        update_system()
+        update_system(args[1] if len(args) == 2 else None)
     
     elif args[0] == 'rollback':
         choice = input('Are you sure? y/N: ')
