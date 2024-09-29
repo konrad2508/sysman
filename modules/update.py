@@ -148,7 +148,7 @@ def subprocess_run_sync(args: list[list[str], dict[str, str]]):
             ret = subprocess.run(cmd, **subprocess_args)
 
 def update_system(pipeline_name: str | None):
-    old_timestamp = read_timestamp()
+    old_timestamp = read_timestamp() if os.path.isfile(TIMESTAMP_FILE) else None
     timestamp = write_timestamp()
 
     update_pipeline = read_update_pipeline_file(timestamp, pipeline_name)
@@ -157,7 +157,8 @@ def update_system(pipeline_name: str | None):
         subprocess_run_sync(update_pipeline)
 
     except subprocess.CalledProcessError:
-        write_timestamp(old_timestamp.isoformat())
+        if old_timestamp is not None:
+            write_timestamp(old_timestamp.isoformat())
 
 def rollback_update():
     if not os.path.isfile(TIMESTAMP_FILE):
